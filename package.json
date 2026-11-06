@@ -1,0 +1,21 @@
+﻿{
+    "name":  "geofone-mvp",
+    "private":  true,
+    "version":  "0.0.0",
+    "type":  "module",
+    "scripts":  {
+                    "dev":  "vite --host",
+                    "build":  "vite build",
+                    "preview":  "vite preview",
+                    "deploy":  "vite build \u0026\u0026 firebase deploy --only hosting"
+                },
+    "devDependencies":  {
+                            "@vitejs/plugin-basic-ssl":  "^2.3.0",
+                            "@vitejs/plugin-react":  "^6.2.1",
+                            "vite":  "^8.3.6"
+                        },
+    "dependencies":  {
+                         "react":  "^19.3.1",
+                         "react-dom":  "^19.3.1"
+                     }
+}
