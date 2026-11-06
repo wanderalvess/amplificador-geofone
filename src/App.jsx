@@ -106,14 +106,18 @@ export default function App() {
   useEffect(() => engine.current?.setMonitor(monitor), [monitor, running])
 
   async function refreshDevices() {
-    const list = await navigator.mediaDevices.enumerateDevices()
-    setDevices(list.filter((d) => d.kind === 'audioinput'))
+    try {
+      const list = await navigator.mediaDevices.enumerateDevices()
+      setDevices(list.filter((d) => d.kind === 'audioinput'))
+    } catch {
+      // ignore
+    }
   }
 
   async function start() {
     setError('')
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-      setError('Abra a página por HTTPS (ou localhost). O navegador bloqueia o microfone fora disso.')
+      setError('Abra a página por HTTPS (ou localhost). O microfone não pode ser acessado em conexões não seguras.')
       return
     }
     try {
@@ -206,7 +210,7 @@ export default function App() {
       const t = now / 1000
       levels.current.push({ t, db: filtDb })
       while (levels.current.length && levels.current[0].t < t - MIN_WINDOW_S) levels.current.shift()
-      // 10th percentile ≈ "minimum level": robust against a single dropout, ignores passing transients.
+      // 10th percentile ≈ "minimum level"
       const minDb = percentile(levels.current.map((l) => l.db), 0.1)
 
       const { lo: bLo, hi: bHi, bypass: bBy, maxF: mF } = band.current
@@ -242,30 +246,51 @@ export default function App() {
   return (
     <div className="app">
       <header>
-        <h1>Geofone MVP</h1>
-        {!running ? (
-          <button className="primary" onClick={start}>▶ Iniciar</button>
-        ) : (
-          <button className="danger" onClick={stop}>■ Parar</button>
-        )}
+        <div className="header-brand">
+          <div className="brand-icon">⚡</div>
+          <div>
+            <h1>
+              Geofone MVP <span className="badge">Pro Acústico</span>
+            </h1>
+          </div>
+        </div>
+        <div className="header-status">
+          <div className={`pulse-dot ${running ? 'active' : ''}`} title={running ? 'Sistema ativo' : 'Desconectado'} />
+          {!running ? (
+            <button className="primary" onClick={start}>▶ Iniciar Escuta</button>
+          ) : (
+            <button className="danger" onClick={stop}>■ Parar</button>
+          )}
+        </div>
       </header>
 
-      {error && <div className="error">{error}</div>}
+      {error && (
+        <div className="error">
+          <span>⚠️</span>
+          <span>{error}</span>
+        </div>
+      )}
 
+      {/* Entrada de Áudio & Configurações de Hardware */}
       <section className="card">
-        <label>
-          Entrada
-          <select value={deviceId} onChange={(e) => setDeviceId(e.target.value)} disabled={running} onFocus={refreshDevices}>
-            <option value="">Padrão do sistema (iRig no P2)</option>
-            {devices.map((d) => (
-              <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId.slice(0, 8)}</option>
-            ))}
-          </select>
-        </label>
+        <div className="card-title">
+          <span>Entrada de Áudio</span>
+          {running && <span style={{ color: 'var(--accent-emerald)', fontSize: '11px' }}>● CONECTADO</span>}
+        </div>
+        <select value={deviceId} onChange={(e) => setDeviceId(e.target.value)} disabled={running} onFocus={refreshDevices}>
+          <option value="">Padrão do Sistema (iRig / Interface no P2/P3 ou USB)</option>
+          {devices.map((d) => (
+            <option key={d.deviceId} value={d.deviceId}>{d.label || `Microfone (${d.deviceId.slice(0, 8)})`}</option>
+          ))}
+        </select>
+
         {info && (
           <div className="info">
-            <div><b>{info.label}</b> · {info.sampleRate} Hz · latência base {fmt((info.baseLatency || 0) * 1000, 0)} ms{info.outputLatency ? ` + saída ${fmt(info.outputLatency * 1000, 0)} ms` : ''}</div>
             <div>
+              <strong style={{ color: 'var(--text-main)' }}>{info.label || 'Dispositivo de Áudio'}</strong> · {info.sampleRate} Hz · Latência: {fmt((info.baseLatency || 0) * 1000, 0)} ms
+              {info.outputLatency ? ` + saída ${fmt(info.outputLatency * 1000, 0)} ms` : ''}
+            </div>
+            <div className="tags-row">
               {['echoCancellation', 'noiseSuppression', 'autoGainControl'].map((k) => (
                 <span key={k} className={info.settings[k] ? 'tag bad' : 'tag ok'}>
                   {k}: {String(info.settings[k] ?? 'n/d')}
@@ -276,61 +301,101 @@ export default function App() {
         )}
       </section>
 
+      {/* Métricas Principais */}
       <section className="meters">
-        <div className="meter">
-          <span>Nível mín. ({MIN_WINDOW_S}s)</span>
+        <div className="meter highlight">
+          <span>Nível Mínimo ({MIN_WINDOW_S}s)</span>
           <strong>{fmt(readout.minDb)} <small>dBFS</small></strong>
         </div>
         <div className="meter">
-          <span>Nível atual</span>
+          <span>Nível Atual</span>
           <strong>{fmt(readout.curDb)} <small>dBFS</small></strong>
         </div>
         <div className="meter">
-          <span>Pico na faixa</span>
+          <span>Pico na Faixa</span>
           <strong>{fmt(readout.peakHz, 0)} <small>Hz</small></strong>
         </div>
         <div className={`meter ${readout.clip ? 'clip' : ''}`}>
-          <span>Entrada</span>
-          <strong>{readout.clip ? 'SATURANDO' : 'OK'}</strong>
+          <span>Saturação</span>
+          <strong>{readout.clip ? 'CLIPANDO' : 'OK'}</strong>
         </div>
       </section>
 
+      {/* Visualização Espectral */}
       <section className="card">
-        <canvas ref={specCanvas} className="spec" />
-        <canvas ref={fallCanvas} className="fall" />
-        <div className="row">
-          <span>Escala:</span>
-          {[1500, 3000, 6000].map((f) => (
-            <button key={f} className={maxF === f ? 'sel' : ''} onClick={() => setMaxF(f)}>{f / 1000} kHz</button>
-          ))}
+        <div className="card-title">
+          <span>Espectrograma & Espectro em Tempo Real</span>
+          <div className="row wrap" style={{ gap: '4px' }}>
+            <span>Escala:</span>
+            {[1500, 3000, 6000].map((f) => (
+              <button key={f} className={maxF === f ? 'sel' : ''} style={{ padding: '3px 8px', fontSize: '11px' }} onClick={() => setMaxF(f)}>
+                {f / 1000} kHz
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="canvas-wrapper">
+          <canvas ref={specCanvas} className="spec" />
+          <canvas ref={fallCanvas} className="fall" />
+          <div className="canvas-legend">
+            <span>Espectro (dBFS x Hz) + Cascata Temporal</span>
+            <span style={{ color: 'var(--accent-amber)' }}>--- Linha Tracejada: Frequência de Pico</span>
+          </div>
         </div>
       </section>
 
+      {/* Filtros e Controle de Som */}
       <section className="card">
+        <div className="card-title">
+          <span>Filtros Band-Pass & Amplificação</span>
+        </div>
+
         <div className="row wrap">
           {Object.entries(PRESETS).map(([k, p]) => (
-            <button key={k} className={preset === k && !bypass ? 'sel' : ''} onClick={() => { choosePreset(k); setBypass(false) }}>{p.label}</button>
+            <button key={k} className={preset === k && !bypass ? 'sel' : ''} onClick={() => { choosePreset(k); setBypass(false) }}>
+              {p.label}
+            </button>
           ))}
-          <button className={bypass ? 'sel' : ''} onClick={() => setBypass(!bypass)}>Sem filtro</button>
+          <button className={bypass ? 'sel' : ''} onClick={() => setBypass(!bypass)}>
+            Sem Filtro (Bypass)
+          </button>
         </div>
+
         <label>
-          Corte grave: {lo} Hz
+          <div className="range-label-row">
+            <span>Corte Grave (High-pass)</span>
+            <span className="range-val">{lo} Hz</span>
+          </div>
           <input type="range" min="20" max="2000" step="10" value={lo} disabled={bypass}
             onChange={(e) => { setPreset('custom'); setLo(Math.min(+e.target.value, hi - 50)) }} />
         </label>
+
         <label>
-          Corte agudo: {hi} Hz
+          <div className="range-label-row">
+            <span>Corte Agudo (Low-pass)</span>
+            <span className="range-val">{hi} Hz</span>
+          </div>
           <input type="range" min="100" max="8000" step="10" value={hi} disabled={bypass}
             onChange={(e) => { setPreset('custom'); setHi(Math.max(+e.target.value, lo + 50)) }} />
         </label>
+
         <label>
-          Ganho de entrada: {gainDb > 0 ? '+' : ''}{gainDb} dB
+          <div className="range-label-row">
+            <span>Ganho Pré-Amp (Entrada)</span>
+            <span className="range-val">{gainDb > 0 ? '+' : ''}{gainDb} dB</span>
+          </div>
           <input type="range" min="-12" max="40" step="1" value={gainDb} onChange={(e) => setGainDb(+e.target.value)} />
         </label>
+
         <label>
-          Volume do fone: {Math.round(volume * 100)}%
+          <div className="range-label-row">
+            <span>Volume no Fone</span>
+            <span className="range-val">{Math.round(volume * 100)}%</span>
+          </div>
           <input type="range" min="0" max="3" step="0.05" value={volume} onChange={(e) => setVolume(+e.target.value)} />
         </label>
+
         <button
           className={`hold ${abHold ? 'active' : ''}`}
           disabled={bypass}
@@ -339,57 +404,110 @@ export default function App() {
           onPointerCancel={() => setAbHold(false)}
           onContextMenu={(e) => e.preventDefault()}
         >
-          {abHold ? 'Ouvindo SEM filtro' : 'Segure para comparar (sem filtro)'}
+          {abHold ? '🔊 Ouvindo SEM Filtro (A/B Ativo)' : '🎧 Pressione e Segure para Teste A/B (Sem Filtro)'}
         </button>
-        <div className="row">
-          <button className={monitor ? 'sel' : ''} onClick={() => setMonitor(!monitor)}>{monitor ? '🎧 Ouvindo' : '🔇 Mudo'}</button>
-          <button className={recording ? 'danger' : ''} disabled={!running} onClick={toggleRecording}>{recording ? '■ Parar gravação' : '● Gravar (bruto)'}</button>
+
+        <div className="row" style={{ marginTop: '14px' }}>
+          <button className={monitor ? 'sel' : ''} onClick={() => setMonitor(!monitor)}>
+            {monitor ? '🎧 Retorno Ativo' : '🔇 Mudo'}
+          </button>
+          <button className={recording ? 'danger' : ''} disabled={!running} onClick={toggleRecording}>
+            {recording ? '⏹ Parar Gravação' : '⏺ Gravar Áudio Bruto'}
+          </button>
         </div>
       </section>
 
+      {/* Mapeamento de Pontos Acústicos */}
       <section className="card">
-        <div className="row">
-          <button className="primary" disabled={!running || saving} onClick={savePoint}>{saving ? 'Pegando GPS…' : '📍 Salvar ponto'}</button>
-          <button disabled={!points.length} onClick={exportCsv}>Exportar CSV</button>
-          <button disabled={!points.length} onClick={() => confirm('Apagar todos os pontos?') && setPoints([])}>Limpar</button>
+        <div className="card-title">
+          <span>Mapeamento de Pontos Acústicos</span>
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{points.length} ponto(s) registrado(s)</span>
         </div>
+
+        <div className="row wrap">
+          <button className="primary" disabled={!running || saving} onClick={savePoint}>
+            {saving ? 'Capturando GPS...' : '📍 Salvar Ponto Atual'}
+          </button>
+          <button disabled={!points.length} onClick={exportCsv}>
+            ⬇ Exportar CSV
+          </button>
+          <button disabled={!points.length} onClick={() => confirm('Deseja limpar todos os pontos salvos?') && setPoints([])}>
+            🗑 Limpar Pontos
+          </button>
+        </div>
+
         {valid.length > 0 && (
-          <div className="bars">
-            {valid.map((p) => {
-              const h = pMax === pMin ? 100 : 15 + ((p.minDb - pMin) / (pMax - pMin)) * 85
-              return (
-                <div key={p.id} className="bar">
-                  <div className={`fill ${p.minDb === pMax ? 'top' : ''}`} style={{ height: `${h}%` }} title={`${p.minDb.toFixed(1)} dBFS`} />
-                  <span>{p.name}</span>
-                </div>
-              )
-            })}
+          <div className="bars-container">
+            <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Comparativo de Ruído Contínuo (Maior barra = Mais próximo do vazamento)
+            </div>
+            <div className="bars">
+              {valid.map((p) => {
+                const h = pMax === pMin ? 100 : 15 + ((p.minDb - pMin) / (pMax - pMin)) * 85
+                return (
+                  <div key={p.id} className="bar">
+                    <div className={`fill ${p.minDb === pMax ? 'top' : ''}`} style={{ height: `${h}%` }} title={`${p.name}: ${p.minDb.toFixed(1)} dBFS`} />
+                    <span>{p.name}</span>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         )}
-        <table>
-          <thead>
-            <tr><th>Ponto</th><th>Mín dB</th><th>Pico Hz</th><th>Faixa</th><th>GPS</th><th></th></tr>
-          </thead>
-          <tbody>
-            {points.map((p) => (
-              <tr key={p.id}>
-                <td>{p.name}</td>
-                <td>{fmt(p.minDb)}</td>
-                <td>{fmt(p.peakHz, 0)}</td>
-                <td>{p.lo ? `${p.lo}–${p.hi}` : 'sem filtro'}</td>
-                <td>{p.lat ? <a href={`https://maps.google.com/?q=${p.lat},${p.lon}`} target="_blank" rel="noreferrer">±{Math.round(p.acc)} m</a> : '—'}</td>
-                <td><button className="x" onClick={() => setPoints(points.filter((q) => q.id !== p.id))}>✕</button></td>
+
+        <div className="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Ponto</th>
+                <th>Mín (dBFS)</th>
+                <th>Pico (Hz)</th>
+                <th>Faixa</th>
+                <th>GPS</th>
+                <th style={{ width: '40px' }}></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {points.length === 0 ? (
+                <tr>
+                  <td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-dim)', padding: '20px' }}>
+                    Nenhum ponto registrado ainda. Clique em "Salvar Ponto Atual" para mapear os locais.
+                  </td>
+                </tr>
+              ) : (
+                points.map((p) => (
+                  <tr key={p.id}>
+                    <td><strong>{p.name}</strong></td>
+                    <td><span style={{ color: p.minDb === pMax ? 'var(--accent-amber)' : 'inherit', fontWeight: p.minDb === pMax ? '700' : 'normal' }}>{fmt(p.minDb)}</span></td>
+                    <td>{fmt(p.peakHz, 0)}</td>
+                    <td>{p.lo ? `${p.lo}–${p.hi} Hz` : 'Sem filtro'}</td>
+                    <td>
+                      {p.lat ? (
+                        <a href={`https://maps.google.com/?q=${p.lat},${p.lon}`} target="_blank" rel="noreferrer">
+                          📍 ±{Math.round(p.acc)}m
+                        </a>
+                      ) : '—'}
+                    </td>
+                    <td>
+                      <button className="x" onClick={() => setPoints(points.filter((q) => q.id !== p.id))} title="Excluir ponto">
+                        ✕
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
 
+      {/* Gerador de Sinal para Calibração */}
       <details className="card">
-        <summary>Gerador de teste (use em OUTRO aparelho)</summary>
+        <summary>
+          <span>Gerador de Sinal de Teste (Calibração)</span>
+        </summary>
         <p className="hint">
-          Toque o sinal no alto-falante de um segundo celular ou do PC e encoste a sonda (ou o microfone) nele.
-          Não use no mesmo aparelho que está medindo: vai dar microfonia.
+          💡 Use em outro aparelho (celular/notebook) para emitir ruído em cano ou alto-falante e calibrar a sensibilidade da haste/geofone sem causar microfonia de retorno.
         </p>
         <div className="row wrap">
           {Object.entries(GEN_TYPES).map(([k, label]) => (
@@ -400,18 +518,24 @@ export default function App() {
         </div>
         {genType === 'tone' && (
           <label>
-            Frequência do tom: {genFreq} Hz
+            <div className="range-label-row">
+              <span>Frequência do Tom Puro</span>
+              <span className="range-val">{genFreq} Hz</span>
+            </div>
             <input type="range" min="50" max="4000" step="10" value={genFreq} onChange={(e) => setGenFreq(+e.target.value)} />
           </label>
         )}
         <label>
-          Volume do gerador: {Math.round(genVol * 100)}%
+          <div className="range-label-row">
+            <span>Volume do Gerador</span>
+            <span className="range-val">{Math.round(genVol * 100)}%</span>
+          </div>
           <input type="range" min="0" max="1" step="0.01" value={genVol} onChange={(e) => setGenVol(+e.target.value)} />
         </label>
       </details>
 
       <footer>
-        Comece com o volume baixo. Mantenha a tela ligada durante a medição. O nível mínimo é o indicador principal: o ponto com o maior nível mínimo tende a estar mais perto do vazamento.
+        Recomendações técnicas: Inicie com volume baixo no fone para proteger sua audição. O nível mínimo contínuo (dBFS) é o indicador mais confiável contra ruídos transitórios.
       </footer>
     </div>
   )
@@ -436,15 +560,17 @@ function drawSpectrum(c, spec, binHz, maxF, bandRange, peakHz) {
   const { width: w, height: h } = c
   const dbMin = -130
   const dbMax = -20
-  g.fillStyle = '#0b1118'
+  g.fillStyle = '#06090e'
   g.fillRect(0, 0, w, h)
+  
   if (bandRange) {
-    g.fillStyle = 'rgba(56,189,248,0.12)'
+    g.fillStyle = 'rgba(56, 189, 248, 0.12)'
     g.fillRect((bandRange[0] / maxF) * w, 0, ((bandRange[1] - bandRange[0]) / maxF) * w, h)
   }
-  g.strokeStyle = '#1f2a37'
+  
+  g.strokeStyle = 'rgba(255, 255, 255, 0.08)'
   g.fillStyle = '#64748b'
-  g.font = `${10 * (window.devicePixelRatio || 1)}px sans-serif`
+  g.font = `${10 * (window.devicePixelRatio || 1)}px monospace`
   const step = maxF <= 1500 ? 250 : maxF <= 3000 ? 500 : 1000
   for (let f = step; f < maxF; f += step) {
     const x = (f / maxF) * w
@@ -452,11 +578,12 @@ function drawSpectrum(c, spec, binHz, maxF, bandRange, peakHz) {
     g.moveTo(x, 0)
     g.lineTo(x, h)
     g.stroke()
-    g.fillText(f >= 1000 ? `${f / 1000}k` : `${f}`, x + 2, h - 4)
+    g.fillText(f >= 1000 ? `${f / 1000}k` : `${f}`, x + 4, h - 6)
   }
+  
   const nBins = Math.min(spec.length, Math.ceil(maxF / binHz))
   g.strokeStyle = '#38bdf8'
-  g.lineWidth = 1.5 * (window.devicePixelRatio || 1)
+  g.lineWidth = 1.8 * (window.devicePixelRatio || 1)
   g.beginPath()
   for (let i = 1; i < nBins; i++) {
     const x = ((i * binHz) / maxF) * w
@@ -464,9 +591,11 @@ function drawSpectrum(c, spec, binHz, maxF, bandRange, peakHz) {
     i === 1 ? g.moveTo(x, y) : g.lineTo(x, y)
   }
   g.stroke()
+  
   if (peakHz) {
     const x = (peakHz / maxF) * w
     g.strokeStyle = '#f59e0b'
+    g.lineWidth = 1.5 * (window.devicePixelRatio || 1)
     g.setLineDash([4, 4])
     g.beginPath()
     g.moveTo(x, 0)

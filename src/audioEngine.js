@@ -9,16 +9,36 @@ export class AudioEngine {
   }
 
   async start(deviceId) {
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        deviceId: deviceId ? { exact: deviceId } : undefined,
-        // Leak noise is stationary broadband noise: the OS "voice" processing would erase it.
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-        channelCount: 1,
-      },
-    })
+    const rawConstraints = {
+      // Leak noise is stationary broadband noise: the OS "voice" processing would erase it.
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+      channelCount: 1,
+    }
+
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          ...rawConstraints,
+          ...(deviceId ? { deviceId: { ideal: deviceId } } : {}),
+        },
+      })
+    } catch (err) {
+      console.warn('Falha ao abrir microfone com restrições exatas, tentando modo compatibilidade:', err)
+      // Fallback 1: tenta sem o deviceId caso ele tenha sido desconectado ou tenha mudado de ID
+      try {
+        this.stream = await navigator.mediaDevices.getUserMedia({
+          audio: rawConstraints,
+        })
+      } catch (err2) {
+        // Fallback 2: áudio padrão do sistema caso o navegador recuse as opções avançadas
+        this.stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+        })
+      }
+    }
+
     const track = this.stream.getAudioTracks()[0]
     this.trackSettings = track.getSettings()
     this.trackLabel = track.label
