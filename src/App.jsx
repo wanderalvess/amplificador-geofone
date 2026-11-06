@@ -134,7 +134,21 @@ export default function App() {
         /* wake lock is optional */
       }
     } catch (err) {
-      setError(`${err.name}: ${err.message}`)
+      let msg = 'Erro ao inicializar o áudio.'
+      if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        msg = 'Dispositivo de microfone não encontrado. Conecte o fone/microfone ou selecione o "Padrão do Sistema".'
+      } else if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        msg = 'Permissão de acesso ao microfone negada. Autorize o microfone nas configurações do seu navegador.'
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        msg = 'O microfone já está em uso por outro aplicativo ou o sistema operacional bloqueou o acesso.'
+      } else if (err.name === 'OverconstrainedError') {
+        msg = 'As configurações exigidas para o microfone não são suportadas por este aparelho.'
+      } else if (err.name === 'SecurityError') {
+        msg = 'Acesso bloqueado por segurança. Acesse através de uma conexão segura HTTPS.'
+      } else {
+        msg = `${err.name}: ${err.message || 'Erro inesperado ao acessar o microfone'}`
+      }
+      setError(msg)
     }
   }
 
@@ -247,10 +261,11 @@ export default function App() {
     <div className="app">
       <header>
         <div className="header-brand">
-          <div className="brand-icon">⚡</div>
+          <img src="/logo-inovar.jpg" alt="Inovar Tecnologia" className="brand-logo" />
           <div>
+            <div className="brand-subtitle">INOVAR TECNOLOGIA INTELIGENTE</div>
             <h1>
-              Geofone MVP <span className="badge">Pro Acústico</span>
+              Geofone Eletrônico <span className="badge">Acústico</span>
             </h1>
           </div>
         </div>
@@ -535,7 +550,7 @@ export default function App() {
       </details>
 
       <footer>
-        Recomendações técnicas: Inicie com volume baixo no fone para proteger sua audição. O nível mínimo contínuo (dBFS) é o indicador mais confiável contra ruídos transitórios.
+        <strong>Inovar Serviço · Tecnologia Inteligente</strong> — Geofone Acústico Digital. O nível mínimo contínuo é o indicador principal de proximidade do vazamento.
       </footer>
     </div>
   )

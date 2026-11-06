@@ -66,16 +66,22 @@ header {
   gap: 12px;
 }
 
-.brand-icon {
-  width: 36px;
-  height: 36px;
-  background: linear-gradient(135deg, #0ea5e9, #0284c7);
+.brand-logo {
+  width: 44px;
+  height: 44px;
   border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 0 16px rgba(14, 165, 233, 0.35);
-  font-size: 18px;
+  object-fit: cover;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  box-shadow: 0 0 15px rgba(14, 165, 233, 0.3);
+}
+
+.brand-subtitle {
+  font-size: 0.65rem;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  margin-bottom: 2px;
+  text-transform: uppercase;
 }
 
 h1 {
